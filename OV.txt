@@ -1,0 +1,26 @@
+Text based game engine
+
+-----------------
+|               |
+| @             |
+|               |
+|               |
+|               |
+-----------------
+
+WASD control player
+
+Walks through different tiles like grass and stuff and then monster randomly
+attacks like pokemon
+
+Battle Scene has player in ASCII art; different attacks like spells and physical
+attack.
+
+STEP 1: Implement graphical ASCII interface and allow for character to move on
+empty plane
+
+STEP 2: Implement random attacks from enemy with battle scene; No graphics yet
+
+STEP 3: Add NPC Characters who you can buy from
+
+STEP 4: Create game loop
