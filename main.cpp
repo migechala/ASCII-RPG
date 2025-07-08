@@ -5,7 +5,7 @@
 #include <unistd.h>
 #include <random>
 #include <algorithm>
-
+#include <sys/ioctl.h>
 
 enum TILE_TYPE{
     TAME_GRASS='.',
@@ -75,19 +75,22 @@ char get_character_input(){
 }
 
 void print_map(std::vector<std::vector<char>> map, int player_x, int player_y,
-               int viewport_x, int viewport_y){
+               int view_rows, int view_cols){
     int map_rows = map.size();
     int map_cols = map[0].size();
 
-    int start_row = std::max(0, player_x - map_rows/2);
-    int start_col = std::max(0, player_y - map_cols/2);
+    int half_rows = view_rows/2;
+    int half_cols = view_cols/2;
 
-    if(start_row + viewport_x > map_rows) start_row = map_rows - viewport_x;
-    if(start_col + viewport_y > map_cols) start_col = map_cols - viewport_y;
+    int start_row = std::max(0, player_y - half_rows);
+    int start_col = std::max(0, player_x - half_cols);
+
+    if(start_row + view_rows > map_rows) start_row = map_rows - view_rows;
+    if(start_col + view_cols > map_cols) start_col = map_cols - view_cols;
 
     std::cout << "\033[H";
-    for (int i = 0; i < viewport_x; i++) {
-        for(int j = 0; j < viewport_y; j++){
+    for (int i = 0; i < view_rows; i++) {
+        for(int j = 0; j < view_cols; j++){
             int map_row = start_row + i;
             int map_col = start_col + j;
 
@@ -119,7 +122,7 @@ std::vector<std::vector<char>> generate_map(int cols, int rows) {
         for (int j = 0; j < cols; ++j) {
             double n = noise.noise(i * scale, j * scale);
             double val = (n + 1) / 2.0;
-            if (val < 0.3){
+            if (val < 0.35){
                 map[i][j] = WATER;
             }
             else if (val < 0.5){
@@ -134,8 +137,11 @@ std::vector<std::vector<char>> generate_map(int cols, int rows) {
 }
 int main(){
     std::cout << "\033[?25l";
-    const int map_rows = 128;
-    const int map_cols = 256;
+    struct winsize w;
+    ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
+
+    const int map_rows = 1000;
+    const int map_cols = 1000;
     const char player_char = '@';
     int player_x = 0;
     int player_y = 0;
@@ -146,7 +152,7 @@ int main(){
     map[player_y][player_x] = player_char;
     bool done = false;
     while(!done){
-        print_map(map, player_x, player_y, 30, 64);
+        print_map(map, player_x, player_y, w.ws_row-1, w.ws_col);
 
         char input = get_character_input();
         map[player_y][player_x] = player_tile;
