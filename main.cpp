@@ -4,14 +4,62 @@
 #include <termios.h>
 #include <unistd.h>
 #include <random>
+#include <algorithm>
 
 
 enum TILE_TYPE{
     TAME_GRASS='.',
     WILD_GRASS=',',
-    CLEAR=' ',
-    WALL='#'
+    WATER=' ',
 };
+
+class Perlin {
+private:
+    std::vector<int> p;
+
+    static double fade(double t) {
+        return t * t * t * (t * (t * 6 - 15) + 10);
+    }
+
+    static double lerp(double t, double a, double b) {
+        return a + t * (b - a);
+    }
+
+    static double grad(int hash, double x, double y) {
+        int h = hash & 15;
+        double u = h < 8 ? x : y;
+        double v = h < 4 ? y : (h == 12 || h == 14 ? x : 0.0);
+        return ((h & 1) ? -u : u) + ((h & 2) ? -v : v);
+    }
+
+public:
+    Perlin() {
+        p.resize(512);
+        std::iota(p.begin(), p.begin() + 256, 0);
+        std::shuffle(p.begin(), p.begin() + 256, std::mt19937{std::random_device{}()});
+        for (int i = 0; i < 256; ++i)
+            p[256 + i] = p[i];
+    }
+
+    double noise(double x, double y) const {
+        int X = (int)std::floor(x) & 255;
+        int Y = (int)std::floor(y) & 255;
+
+        x -= std::floor(x);
+        y -= std::floor(y);
+
+        double u = fade(x);
+        double v = fade(y);
+
+        int A = p[X] + Y, B = p[X + 1] + Y;
+
+        return lerp(v,
+                    lerp(u, grad(p[A], x, y), grad(p[B], x - 1, y)),
+                    lerp(u, grad(p[A + 1], x, y - 1), grad(p[B + 1], x - 1, y - 1))
+        );
+    }
+};
+
 
 char get_character_input(){
     termios oldt{}, newt{};
@@ -26,13 +74,26 @@ char get_character_input(){
     return ch;
 }
 
-void print_map(std::vector<std::vector<char>> map){
+void print_map(std::vector<std::vector<char>> map, int player_x, int player_y,
+               int viewport_x, int viewport_y){
+    int map_rows = map.size();
+    int map_cols = map[0].size();
+
+    int start_row = std::max(0, player_x - map_rows/2);
+    int start_col = std::max(0, player_y - map_cols/2);
+
+    if(start_row + viewport_x > map_rows) start_row = map_rows - viewport_x;
+    if(start_col + viewport_y > map_cols) start_col = map_cols - viewport_y;
+
     std::cout << "\033[H";
-    for (const auto& row : map) {
-        for (char tile : row) {
-            std::cout << tile;
+    for (int i = 0; i < viewport_x; i++) {
+        for(int j = 0; j < viewport_y; j++){
+            int map_row = start_row + i;
+            int map_col = start_col + j;
+
+            std::cout << map[map_row][map_col];
         }
-        std::cout << '\n';
+        std::cout << std::endl;
     }
 }
 
@@ -50,43 +111,34 @@ bool check_wild_grass_event(char tile) {
 }
 
 std::vector<std::vector<char>> generate_map(int cols, int rows) {
-    std::vector<std::vector<char>> map(rows, std::vector<char>(cols, CLEAR));
+    std::vector<std::vector<char>> map(rows, std::vector<char>(cols, WATER));
+    Perlin noise;
 
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_real_distribution<> prob(0.0, 1.0);
-
+    double scale = 0.1;
     for (int i = 0; i < rows; ++i) {
         for (int j = 0; j < cols; ++j) {
-            if (i == 0 || j == 0 || i == rows - 1 || j == cols - 1) {
-                map[i][j] = '#';
-            } else {
-                double r = prob(gen);
-                double grass_coeff = 1.0;
-                double dif_coeff = 0.2;
-                if(map[i-1][j] == TAME_GRASS) grass_coeff*=dif_coeff;
-                if(map[i][j-1] == TAME_GRASS) grass_coeff*=dif_coeff;
-                if (r*grass_coeff < 0.15){
-                    map[i][j] = TAME_GRASS;
-                    if (r < 0.1){
-                        map[i][j] = WILD_GRASS;
-                    }
-                }
+            double n = noise.noise(i * scale, j * scale);
+            double val = (n + 1) / 2.0;
+            if (val < 0.3){
+                map[i][j] = WATER;
+            }
+            else if (val < 0.5){
+                map[i][j] = WILD_GRASS;
+            }
+            else{
+                map[i][j] = TAME_GRASS;
             }
         }
     }
-
     return map;
 }
-
-
 int main(){
     std::cout << "\033[?25l";
-    const int map_rows = 30;
-    const int map_cols = map_rows*2;
+    const int map_rows = 128;
+    const int map_cols = 256;
     const char player_char = '@';
-    int player_x = 1;
-    int player_y = 1;
+    int player_x = 0;
+    int player_y = 0;
     char player_tile = TAME_GRASS;
 
     std::vector<std::vector<char>> map(generate_map(map_cols, map_rows));
@@ -94,14 +146,17 @@ int main(){
     map[player_y][player_x] = player_char;
     bool done = false;
     while(!done){
-        print_map(map);
+        print_map(map, player_x, player_y, 30, 64);
 
         char input = get_character_input();
         map[player_y][player_x] = player_tile;
-        if (input == 'a' && player_x > 1) player_x--;
-        else if (input == 'd' && player_x < map_cols - 2) player_x++;
-        else if (input == 'w' && player_y > 1) player_y--;
-        else if (input == 's' && player_y < map_rows - 2) player_y++;
+        if (input == 'a' && player_x > 0 && map[player_y][player_x - 1] != WATER) player_x--;
+        else if (input == 'd' && player_x < map_cols - 1 &&
+                map[player_y][player_x + 1] != WATER) player_x++;
+        else if (input == 'w' && player_y > 0 &&
+                map[player_y-1][player_x] != WATER) player_y--;
+        else if (input == 's' && player_y < map_rows - 1 &&
+                map[player_y+1][player_x] != WATER) player_y++;
         else if (input == 'q') done = true;
         player_tile = map[player_y][player_x];
         map[player_y][player_x] = player_char;
