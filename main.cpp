@@ -6,10 +6,14 @@
 #include <random>
 #include <algorithm>
 #include <sys/ioctl.h>
+#include <stack>
+#include <chrono>
 
 enum TILE_TYPE{
     TAME_GRASS='.',
     WILD_GRASS=',',
+    FOREST='^',
+    BUSH=';',
     WATER=' ',
 };
 
@@ -61,21 +65,9 @@ public:
 };
 
 
-char get_character_input(){
-    termios oldt{}, newt{};
-    tcgetattr(STDIN_FILENO, &oldt);
-    newt = oldt;
-    newt.c_lflag &= ~(ICANON | ECHO);
-    tcsetattr(STDIN_FILENO, TCSANOW, &newt);
-
-    char ch = getchar();
-
-    tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
-    return ch;
-}
 
 void print_map(std::vector<std::vector<char>> map, int player_x, int player_y,
-               int view_rows, int view_cols){
+               int view_rows, int view_cols, int scale){
     int map_rows = map.size();
     int map_cols = map[0].size();
 
@@ -90,13 +82,16 @@ void print_map(std::vector<std::vector<char>> map, int player_x, int player_y,
 
     std::cout << "\033[H";
     for (int i = 0; i < view_rows; i++) {
-        for(int j = 0; j < view_cols; j++){
-            int map_row = start_row + i;
-            int map_col = start_col + j;
-
-            std::cout << map[map_row][map_col];
+        for(int line = 0; line < scale; line++){
+            for(int j = 0; j < view_cols; j++){
+                int map_row = start_row + i;
+                int map_col = start_col + j;
+                char tile = map[map_row][map_col];
+                std::string big_tile = std::string(scale, tile);
+                std::cout << big_tile;
+            }
+            std::cout << std::endl;
         }
-        std::cout << std::endl;
     }
 }
 
@@ -125,8 +120,14 @@ std::vector<std::vector<char>> generate_map(int cols, int rows) {
             if (val < 0.35){
                 map[i][j] = WATER;
             }
-            else if (val < 0.5){
+            else if (val < 0.45){
                 map[i][j] = WILD_GRASS;
+            }
+            else if (val < 0.453){
+                map[i][j] = BUSH;
+            }
+            else if (val < 0.55){
+                map[i][j]=FOREST;
             }
             else{
                 map[i][j] = TAME_GRASS;
@@ -135,14 +136,110 @@ std::vector<std::vector<char>> generate_map(int cols, int rows) {
     }
     return map;
 }
+
+struct Text{
+    std::string title;
+    std::string text;
+    std::vector<std::string> options;
+    Text(std::string title, std::string text, std::vector<std::string>
+             options={}) : title(title), text(text), options(options) {}
+    Text() : title(""), text(""), options({}) {}
+};
+
+void add_text_box(Text text_box, int rows, int cols) {
+    std::string title = text_box.title;
+    std::string text = text_box.text;
+    auto options = text_box.options;
+
+
+    if (rows < 5) rows = 5;
+    if (cols < 10) cols = 10;
+
+    int title_len = (int)title.size();
+    int side_space = (cols - 2 - title_len) / 2;
+
+    std::cout << "+" << std::string(cols - 2, '-') << "+\n";
+
+    std::cout << "|"
+              << std::string(side_space, ' ')
+              << title
+              << std::string(cols - 2 - side_space - title_len, ' ')
+              << "|\n";
+
+    std::cout << "+" << std::string(cols - 2, '-') << "+\n";
+    int text_rows = rows - 6;
+    if (text.length()!=0){
+        if (text_rows < 1) text_rows = 1;
+        std::vector<std::string> text_lines;
+        for (size_t start = 0; start < text.size();) {
+            int len = std::min(cols - 4, (int)(text.size() - start));
+            text_lines.push_back(text.substr(start, len));
+            start += len;
+        }
+
+        for (int i = 0; i < text_rows; i++) {
+            std::string line = i < (int)text_lines.size() ? text_lines[i] : "";
+            std::cout << "| " << line;
+            std::cout << std::string(cols - 3 - line.size(), ' ') << "|\n";
+        }
+        std::cout << "+" << std::string(cols - 2, '-') << "+\n";
+    }
+    int option_rows = rows - 4 - text_rows;
+    for (int i = 0; i < option_rows && i < (int)options.size(); i++) {
+        std::string opt = options[i];
+        if ((int)opt.size() > cols - 4) {
+            opt = opt.substr(0, cols - 7) + "...";
+        }
+        std::cout << "| " << opt << std::string(cols - 3 - opt.size(), ' ') << "|\n";
+    }
+
+    for (int i = (int)options.size(); i < option_rows; i++) {
+        std::cout << "|" << std::string(cols - 2, ' ') << "|\n";
+    }
+
+    std::cout << "+" << std::string(cols - 2, '-') << "+\n";
+}
+
+char get_character_input() {
+    static struct termios oldt, newt;
+    static bool initialized = false;
+    if(!initialized){
+        tcgetattr(STDIN_FILENO, &oldt);
+        newt = oldt;
+        newt.c_lflag &= ~(ICANON | ECHO);
+        tcsetattr(STDIN_FILENO, TCSANOW, &newt);
+        initialized = true;
+    }
+
+    int bytes_waiting;
+
+    ioctl(STDIN_FILENO, FIONREAD, &bytes_waiting);
+    char c = '\0';
+    if(bytes_waiting > 0){
+        read(STDIN_FILENO, &c, 1);
+    }
+    return c;
+}
+
+void reset_terminal() {
+    static struct termios oldt;
+    tcgetattr(STDIN_FILENO, &oldt);
+    oldt.c_lflag |= (ICANON | ECHO);
+    tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+}
+
 int main(){
     std::cout << "\033[?25l";
     struct winsize w;
     ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
-
+    const int max_fps = 30;
+    const int frame_time_us = 1000000 / max_fps;
     const int map_rows = 1000;
     const int map_cols = 1000;
     const char player_char = '@';
+    const int scale = 2;
+    const int text_box_duration_frames = 90;
+
     int player_x = 0;
     int player_y = 0;
     char player_tile = TAME_GRASS;
@@ -151,27 +248,59 @@ int main(){
 
     map[player_y][player_x] = player_char;
     bool done = false;
+    int status_rows = 6;
+    int text_box_size = 15;
+    int extra_message_rows = status_rows;
+    std::stack<Text> text_boxes;
+    text_boxes.push({"Status", "", {"Health: 100%", "Location: (" +
+        std::to_string(player_x) + "," + std::to_string(player_y) + ")"}});
+    int frame_count_text_box = text_box_duration_frames;
     while(!done){
-        print_map(map, player_x, player_y, w.ws_row-1, w.ws_col);
+        auto start_time = std::chrono::high_resolution_clock::now();
 
+        print_map(map, player_x, player_y, (w.ws_row-1-extra_message_rows)/scale,
+                  w.ws_col/scale, scale);
+
+        if(text_boxes.size()==1){
+            extra_message_rows = status_rows;
+        }
+        else{
+            if(frame_count_text_box == 0){
+                text_boxes.pop();
+                frame_count_text_box = text_box_duration_frames;
+            }
+            else{
+                extra_message_rows = text_box_size;
+                frame_count_text_box -= 1;
+            }
+        }
+
+        add_text_box(text_boxes.top(), extra_message_rows, w.ws_col);
         char input = get_character_input();
+        bool moved = false;
         map[player_y][player_x] = player_tile;
+        if (input != '\0') moved = true;
         if (input == 'a' && player_x > 0 && map[player_y][player_x - 1] != WATER) player_x--;
-        else if (input == 'd' && player_x < map_cols - 1 &&
-                map[player_y][player_x + 1] != WATER) player_x++;
-        else if (input == 'w' && player_y > 0 &&
-                map[player_y-1][player_x] != WATER) player_y--;
-        else if (input == 's' && player_y < map_rows - 1 &&
-                map[player_y+1][player_x] != WATER) player_y++;
+        else if (input == 'd' && player_x < map_cols - 1 && map[player_y][player_x + 1] != WATER) player_x++;
+        else if (input == 'w' && player_y > 0 && map[player_y-1][player_x] != WATER) player_y--;
+        else if (input == 's' && player_y < map_rows - 1 && map[player_y+1][player_x] != WATER) player_y++;
         else if (input == 'q') done = true;
         player_tile = map[player_y][player_x];
         map[player_y][player_x] = player_char;
 
-        if(check_wild_grass_event(player_tile)){
+        if(moved && check_wild_grass_event(player_tile)){
             //BATTLE SEQUENCE!!
+            text_boxes.push({"Battle!", "A wild NULL appeared! Prepare to fight!", {}});
         }
-
+        auto end_time = std::chrono::high_resolution_clock::now();
+        auto elapsed_us =
+            std::chrono::duration_cast<std::chrono::microseconds>(end_time -
+                                                                  start_time).count();
+        if(elapsed_us < frame_time_us){
+            usleep(frame_time_us - elapsed_us);
+        }
     }
+    reset_terminal();
     std::cout << "\033[?25h";
     return 0;
 }
