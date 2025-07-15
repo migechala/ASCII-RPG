@@ -292,6 +292,11 @@ struct AttackType{
     AttackType(std::string name, int damage): name(name), damage(damage) {}
 };
 
+enum STATE{
+    MAP=0,
+    BATTLE=1
+};
+
 int main(){
     std::cout << "\033[?25l";
     struct winsize w;
@@ -306,12 +311,14 @@ int main(){
     const int scale = 2;
     const int text_box_duration_frames = 90;
     bool able_to_move = true;
-    bool in_battle = false;
     std::unique_ptr<HostileType> current_enemy;
+
+    STATE game_state = STATE::MAP;
 
     int player_x = 0;
     int player_y = 0;
     char player_tile = TAME_GRASS;
+    int player_health = 100;
 
     std::vector<std::vector<char>> map(generate_map(map_cols, map_rows));
 
@@ -321,7 +328,7 @@ int main(){
     int text_box_size = 15;
     int extra_message_rows = status_rows;
     std::stack<Text> text_boxes;
-    text_boxes.push({"Status", "", {"Health: 100%", "Location: " + tile_type_to_string(player_tile)}});
+    text_boxes.push({"Status", "", {"Health: " + std::to_string(player_health), "Location: " + tile_type_to_string(player_tile)}});
     int frame_count_text_box = text_box_duration_frames;
 
     std::vector<AttackType> attacks = {AttackType("Punch", 10), AttackType("Ember", 15), AttackType("Wave", 10), AttackType("Quick Attack", 5)};
@@ -329,22 +336,25 @@ int main(){
 
     std::vector<ATTACK>player_attacks = {ATTACK::PUNCH, ATTACK::EMBER, ATTACK::WAVE, ATTACK::QUICK_ATTACK};
 
-    //add_text_box({hostiles[0].name, hostiles[0].art}, 5, win_width);
     while(!done){
         auto start_time = std::chrono::high_resolution_clock::now();
         std::cout << "\033[H";
 
-        if(!in_battle){
+        if(game_state == STATE::MAP){
             print_map(map, player_x, player_y, (win_height-extra_message_rows)/scale,
                   win_width/scale, scale);
-            if(text_boxes.size()==1){
+            if(text_boxes.size() == 1 && text_boxes.top().title == "Status"){
                 extra_message_rows = status_rows;
-                text_boxes.pop();
-                text_boxes.push({"Status", "", {"Health: 100%", "Location: " + tile_type_to_string(player_tile)}});
+                if(text_boxes.size() > 0){
+                    text_boxes.pop();
+                }
+                text_boxes.push({"Status", "", {"Health: " + std::to_string(player_health), "Location: " + tile_type_to_string(player_tile)}});
             }
             else{
                 if(frame_count_text_box == 0){
-                    text_boxes.pop();
+                    if(text_boxes.size() > 0){
+                        text_boxes.pop();
+                    }
                     frame_count_text_box = text_box_duration_frames;
                 }
                 else{
@@ -352,14 +362,32 @@ int main(){
                     frame_count_text_box -= 1;
                 }
             }
-            add_text_box(text_boxes.top(), extra_message_rows, win_width);
+            if(text_boxes.size() > 0){
+                add_text_box(text_boxes.top(), extra_message_rows, win_width);
+            }
         }
-        else{
-            int attack_menu_height = 4+attacks.size();
-            add_text_box({current_enemy->name, current_enemy->art}, 5, win_width);
-            add_text_box({"Attack Menu", "", {"1. " + attacks[player_attacks[0]].name, "2. " + attacks[player_attacks[1]].name,
-                "3. " + attacks[player_attacks[2]].name, "4. " + attacks[player_attacks[3]].name}}, attack_menu_height, win_width);
-
+        else if (game_state == STATE::BATTLE){
+            current_enemy->draw();
+            if(text_boxes.size() > 0){
+                if(frame_count_text_box == 0){
+                    if(text_boxes.size() > 0){
+                        text_boxes.pop();
+                    }
+                    frame_count_text_box = text_box_duration_frames;
+                }
+                else{
+                    extra_message_rows = text_box_size;
+                    frame_count_text_box -= 1;
+                }
+                if(text_boxes.size() > 0){
+                    add_text_box(text_boxes.top(), extra_message_rows, win_width);
+                }
+            }
+            else{
+                add_text_box({"Attack Menu", "", {"Player Health: " + std::to_string(player_health), "Enemy Health: " + std::to_string(current_enemy->health),
+                    "1. " + attacks[player_attacks[0]].name, "2. " + attacks[player_attacks[1]].name,
+                    "3. " + attacks[player_attacks[2]].name, "4. " + attacks[player_attacks[3]].name}}, extra_message_rows, win_width);
+            }
         }
 
         char input = get_character_input();
@@ -374,18 +402,24 @@ int main(){
         player_tile = map[player_y][player_x];
         map[player_y][player_x] = player_char;
 
-        if (in_battle){
-            switch(input){
-                case '1':
-                    break;
-                case '2':
-                    break;
-                case '3':
-                    break;
-                case '4':
-                    break;
-                default:
-                    break;
+        if (game_state == STATE::BATTLE){
+           if(frame_count_text_box == text_box_duration_frames && input - '0' <= 4 && input - '0' >= 1){
+                current_enemy->health -= attacks[player_attacks[input - '0']].damage;
+                ATTACK enemy_move = current_enemy->attacks[0]; // make this random later
+                text_boxes.push({"Battle!", current_enemy->name + " took " + std::to_string(attacks[player_attacks[input - '0']].damage) + " damage!", {}});
+                text_boxes.push({"Battle!","", {current_enemy->name + " used " + attacks[enemy_move].name, "Player took " + std::to_string(attacks[enemy_move].damage) + " damage!"}});
+                player_health -= attacks[enemy_move].damage;
+            }
+
+            if (current_enemy->health <= 0){
+                while(!text_boxes.empty()){
+                    text_boxes.pop();
+                }
+                text_boxes.push({"Battle!", "You've successfully defeated the " + current_enemy->name + " hooray!", {}});
+                current_enemy.reset();
+                able_to_move = true;
+                game_state = STATE::MAP;
+                able_to_move = true;
             }
         }
 
@@ -399,10 +433,11 @@ int main(){
             text_boxes.push({"Battle!", "A wild " + current_enemy->name + " appeared! Prepare to fight!", {}});
             able_to_move = false;
         }
-        if(!in_battle && !able_to_move && text_boxes.size() == 1){
-            // Battle Sequence
+
+        if(game_state == STATE::MAP && !able_to_move && text_boxes.size() == 1){
+            // init battle Sequence
             able_to_move = false;
-            in_battle = true;
+            game_state = STATE::BATTLE;
             system("clear");
             while(text_boxes.size() > 0){
                 text_boxes.pop();
