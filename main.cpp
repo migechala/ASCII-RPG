@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <sys/ioctl.h>
 #include <stack>
+#include <memory>
+#include <fstream>
 #include <chrono>
 
 enum TILE_TYPE{
@@ -15,6 +17,17 @@ enum TILE_TYPE{
     FOREST='^',
     BUSH=';',
     WATER=' ',
+};
+
+enum ATTACK {
+    PUNCH=0,
+    EMBER,
+    WAVE,
+    QUICK_ATTACK
+};
+
+enum HOSTILE_TYPE{
+    WASP=0
 };
 
 class Perlin {
@@ -80,7 +93,6 @@ void print_map(std::vector<std::vector<char>> map, int player_x, int player_y,
     if(start_row + view_rows > map_rows) start_row = map_rows - view_rows;
     if(start_col + view_cols > map_cols) start_col = map_cols - view_cols;
 
-    std::cout << "\033[H";
     for (int i = 0; i < view_rows; i++) {
         for(int line = 0; line < scale; line++){
             for(int j = 0; j < view_cols; j++){
@@ -184,6 +196,9 @@ void add_text_box(Text text_box, int rows, int cols) {
         }
         std::cout << "+" << std::string(cols - 2, '-') << "+\n";
     }
+    else{
+        text_rows = 0;
+    }
     int option_rows = rows - 4 - text_rows;
     for (int i = 0; i < option_rows && i < (int)options.size(); i++) {
         std::string opt = options[i];
@@ -200,7 +215,7 @@ void add_text_box(Text text_box, int rows, int cols) {
     std::cout << "+" << std::string(cols - 2, '-') << "+\n";
 }
 
-char get_character_input() {
+char get_character_input(bool blocking=false) {
     static struct termios oldt, newt;
     static bool initialized = false;
     if(!initialized){
@@ -212,11 +227,15 @@ char get_character_input() {
     }
 
     int bytes_waiting;
-
-    ioctl(STDIN_FILENO, FIONREAD, &bytes_waiting);
     char c = '\0';
-    if(bytes_waiting > 0){
-        read(STDIN_FILENO, &c, 1);
+    if(!blocking){
+        ioctl(STDIN_FILENO, FIONREAD, &bytes_waiting);
+        if(bytes_waiting > 0){
+            read(STDIN_FILENO, &c, 1);
+        }
+    }
+    else{
+        return getchar();
     }
     return c;
 }
@@ -228,17 +247,67 @@ void reset_terminal() {
     tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
 }
 
+std::string tile_type_to_string(char tile){
+    switch(tile){
+        case TAME_GRASS:
+            return "Tame Grass (Safe)";
+        case WILD_GRASS:
+            return "Wild Grass (Dangerous)";
+        case BUSH:
+            return "Bush (Unsafe)";
+        case WATER:
+            return "Water (How did you get here...)";
+        case FOREST:
+            return "Forest (Super Dangerous)";
+        default:
+            return "NULL";
+    }
+}
+
+
+
+struct HostileType{
+    std::shared_ptr<std::ifstream> file_stream;
+    std::string name;
+    std::string art;
+    int health;
+    std::vector<ATTACK> attacks;
+    void draw(){
+        std::cout << art << std::endl;
+    }
+    HostileType(std::string name, int health, std::vector<ATTACK> attacks): name(name), health(health), attacks(attacks) {
+        file_stream = std::make_shared<std::ifstream>("assets/"+this->name);
+        if(file_stream && file_stream->is_open()){
+            std::string line;
+            while(std::getline(*file_stream, line)){
+                art += line + "\n";
+            }
+        }
+    }
+};
+
+struct AttackType{
+    std::string name;
+    int damage;
+    AttackType(std::string name, int damage): name(name), damage(damage) {}
+};
+
 int main(){
     std::cout << "\033[?25l";
     struct winsize w;
     ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
-    const int max_fps = 30;
+    const int win_width = w.ws_col;
+    const int win_height = w.ws_row-1;
+    const int max_fps = 60;
     const int frame_time_us = 1000000 / max_fps;
     const int map_rows = 1000;
     const int map_cols = 1000;
     const char player_char = '@';
     const int scale = 2;
     const int text_box_duration_frames = 90;
+    bool able_to_move = true;
+    bool in_battle = false;
+    std::unique_ptr<HostileType> current_enemy;
 
     int player_x = 0;
     int player_y = 0;
@@ -252,45 +321,92 @@ int main(){
     int text_box_size = 15;
     int extra_message_rows = status_rows;
     std::stack<Text> text_boxes;
-    text_boxes.push({"Status", "", {"Health: 100%", "Location: (" +
-        std::to_string(player_x) + "," + std::to_string(player_y) + ")"}});
+    text_boxes.push({"Status", "", {"Health: 100%", "Location: " + tile_type_to_string(player_tile)}});
     int frame_count_text_box = text_box_duration_frames;
+
+    std::vector<AttackType> attacks = {AttackType("Punch", 10), AttackType("Ember", 15), AttackType("Wave", 10), AttackType("Quick Attack", 5)};
+    std::vector<HostileType> hostiles = {HostileType("Wasp", 40, {ATTACK::PUNCH})};
+
+    std::vector<ATTACK>player_attacks = {ATTACK::PUNCH, ATTACK::EMBER, ATTACK::WAVE, ATTACK::QUICK_ATTACK};
+
+    //add_text_box({hostiles[0].name, hostiles[0].art}, 5, win_width);
     while(!done){
         auto start_time = std::chrono::high_resolution_clock::now();
+        std::cout << "\033[H";
 
-        print_map(map, player_x, player_y, (w.ws_row-1-extra_message_rows)/scale,
-                  w.ws_col/scale, scale);
-
-        if(text_boxes.size()==1){
-            extra_message_rows = status_rows;
-        }
-        else{
-            if(frame_count_text_box == 0){
+        if(!in_battle){
+            print_map(map, player_x, player_y, (win_height-extra_message_rows)/scale,
+                  win_width/scale, scale);
+            if(text_boxes.size()==1){
+                extra_message_rows = status_rows;
                 text_boxes.pop();
-                frame_count_text_box = text_box_duration_frames;
+                text_boxes.push({"Status", "", {"Health: 100%", "Location: " + tile_type_to_string(player_tile)}});
             }
             else{
-                extra_message_rows = text_box_size;
-                frame_count_text_box -= 1;
+                if(frame_count_text_box == 0){
+                    text_boxes.pop();
+                    frame_count_text_box = text_box_duration_frames;
+                }
+                else{
+                    extra_message_rows = text_box_size;
+                    frame_count_text_box -= 1;
+                }
             }
+            add_text_box(text_boxes.top(), extra_message_rows, win_width);
+        }
+        else{
+            int attack_menu_height = 4+attacks.size();
+            add_text_box({current_enemy->name, current_enemy->art}, 5, win_width);
+            add_text_box({"Attack Menu", "", {"1. " + attacks[player_attacks[0]].name, "2. " + attacks[player_attacks[1]].name,
+                "3. " + attacks[player_attacks[2]].name, "4. " + attacks[player_attacks[3]].name}}, attack_menu_height, win_width);
+
         }
 
-        add_text_box(text_boxes.top(), extra_message_rows, w.ws_col);
         char input = get_character_input();
         bool moved = false;
         map[player_y][player_x] = player_tile;
-        if (input != '\0') moved = true;
-        if (input == 'a' && player_x > 0 && map[player_y][player_x - 1] != WATER) player_x--;
-        else if (input == 'd' && player_x < map_cols - 1 && map[player_y][player_x + 1] != WATER) player_x++;
-        else if (input == 'w' && player_y > 0 && map[player_y-1][player_x] != WATER) player_y--;
-        else if (input == 's' && player_y < map_rows - 1 && map[player_y+1][player_x] != WATER) player_y++;
+        if (able_to_move && input != '\0') moved = true;
+        if (able_to_move && input == 'a' && player_x > 0 && map[player_y][player_x - 1] != WATER) player_x--;
+        else if (able_to_move && input == 'd' && player_x < map_cols - 1 && map[player_y][player_x + 1] != WATER) player_x++;
+        else if (able_to_move && input == 'w' && player_y > 0 && map[player_y-1][player_x] != WATER) player_y--;
+        else if (able_to_move && input == 's' && player_y < map_rows - 1 && map[player_y+1][player_x] != WATER) player_y++;
         else if (input == 'q') done = true;
         player_tile = map[player_y][player_x];
         map[player_y][player_x] = player_char;
 
+        if (in_battle){
+            switch(input){
+                case '1':
+                    break;
+                case '2':
+                    break;
+                case '3':
+                    break;
+                case '4':
+                    break;
+                default:
+                    break;
+            }
+        }
+
         if(moved && check_wild_grass_event(player_tile)){
-            //BATTLE SEQUENCE!!
-            text_boxes.push({"Battle!", "A wild NULL appeared! Prepare to fight!", {}});
+            static std::random_device rd;
+            static std::mt19937 gen(rd());
+            static std::uniform_int_distribution<int> dist(0, hostiles.size()-1);
+
+            current_enemy = std::make_unique<HostileType>(hostiles[dist(gen)]);
+
+            text_boxes.push({"Battle!", "A wild " + current_enemy->name + " appeared! Prepare to fight!", {}});
+            able_to_move = false;
+        }
+        if(!in_battle && !able_to_move && text_boxes.size() == 1){
+            // Battle Sequence
+            able_to_move = false;
+            in_battle = true;
+            system("clear");
+            while(text_boxes.size() > 0){
+                text_boxes.pop();
+            }
         }
         auto end_time = std::chrono::high_resolution_clock::now();
         auto elapsed_us =
