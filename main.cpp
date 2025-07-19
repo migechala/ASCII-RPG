@@ -12,6 +12,7 @@
 #include <chrono>
 
 enum TILE_TYPE{
+    PLAYER='@',
     TAME_GRASS='.',
     WILD_GRASS=',',
     FOREST='^',
@@ -79,7 +80,7 @@ public:
 
 
 
-void print_map(std::vector<std::vector<char>> map, int player_x, int player_y,
+void print_map(std::vector<std::vector<TILE_TYPE>> map, int player_x, int player_y,
                int view_rows, int view_cols, int scale){
     int map_rows = map.size();
     int map_cols = map[0].size();
@@ -107,21 +108,8 @@ void print_map(std::vector<std::vector<char>> map, int player_x, int player_y,
     }
 }
 
-bool check_wild_grass_event(char tile) {
-    if (tile == WILD_GRASS) {
-        static std::random_device rd;
-        static std::mt19937 gen(rd());
-        static std::uniform_int_distribution<int> dist(1, 100);
-
-        if (dist(gen) <= 25) {
-            return true;
-        }
-    }
-    return false;
-}
-
-std::vector<std::vector<char>> generate_map(int cols, int rows) {
-    std::vector<std::vector<char>> map(rows, std::vector<char>(cols, WATER));
+std::vector<std::vector<TILE_TYPE>> generate_map(int cols, int rows) {
+    std::vector<std::vector<TILE_TYPE>> map(rows, std::vector<TILE_TYPE>(cols, TILE_TYPE::WATER));
     Perlin noise;
 
     double scale = 0.1;
@@ -265,6 +253,23 @@ std::string tile_type_to_string(char tile){
 }
 
 
+bool check_battle_event(TILE_TYPE tile) {
+    static std::random_device rd;
+    static std::mt19937 gen(rd());
+    static std::uniform_int_distribution<int> dist(1, 100);
+    int rand = dist(gen);
+    switch(tile){
+        case TILE_TYPE::WILD_GRASS:
+            return rand < 10;
+        case TILE_TYPE::BUSH:
+            return rand < 5;
+        case TILE_TYPE::FOREST:
+            return rand < 15;
+        default:
+            return false;
+    }
+}
+
 
 struct HostileType{
     std::shared_ptr<std::ifstream> file_stream;
@@ -297,7 +302,13 @@ enum STATE{
     BATTLE=1
 };
 
+void log_file(std::string txt){
+    std::ofstream file("log.txt", std::ios_base::app);
+    file << txt << std::endl;
+}
+
 int main(){
+    log_file("Start ------------------------------------\n\n");
     std::cout << "\033[?25l";
     struct winsize w;
     ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
@@ -307,7 +318,7 @@ int main(){
     const int frame_time_us = 1000000 / max_fps;
     const int map_rows = 1000;
     const int map_cols = 1000;
-    const char player_char = '@';
+    const TILE_TYPE player_char = TILE_TYPE::PLAYER;
     const int scale = 2;
     const int text_box_duration_frames = 90;
     bool able_to_move = true;
@@ -317,10 +328,10 @@ int main(){
 
     int player_x = 0;
     int player_y = 0;
-    char player_tile = TAME_GRASS;
+    TILE_TYPE player_tile = TILE_TYPE::TAME_GRASS;
     int player_health = 100;
 
-    std::vector<std::vector<char>> map(generate_map(map_cols, map_rows));
+    std::vector<std::vector<TILE_TYPE>> map(generate_map(map_cols, map_rows));
 
     map[player_y][player_x] = player_char;
     bool done = false;
@@ -334,6 +345,7 @@ int main(){
     std::vector<AttackType> attacks = {AttackType("Punch", 10), AttackType("Ember", 15), AttackType("Wave", 10), AttackType("Quick Attack", 5)};
     std::vector<HostileType> hostiles = {HostileType("Wasp", 40, {ATTACK::PUNCH})};
 
+    //current_enemy = std::make_unique<HostileType>(hostiles[0]);
     std::vector<ATTACK>player_attacks = {ATTACK::PUNCH, ATTACK::EMBER, ATTACK::WAVE, ATTACK::QUICK_ATTACK};
 
     while(!done){
@@ -343,22 +355,26 @@ int main(){
         if(game_state == STATE::MAP){
             print_map(map, player_x, player_y, (win_height-extra_message_rows)/scale,
                   win_width/scale, scale);
-            if(text_boxes.size() == 1 && text_boxes.top().title == "Status"){
+            if(text_boxes.size() == 0 || text_boxes.top().title == "Status"){
                 extra_message_rows = status_rows;
                 if(text_boxes.size() > 0){
-                    text_boxes.pop();
+                    while(text_boxes.size() != 0){
+                        text_boxes.pop();
+                    }
                 }
                 text_boxes.push({"Status", "", {"Health: " + std::to_string(player_health), "Location: " + tile_type_to_string(player_tile)}});
             }
             else{
                 if(frame_count_text_box == 0){
                     if(text_boxes.size() > 0){
+                        log_file("popping! " + std::to_string(text_boxes.size()));
                         text_boxes.pop();
                     }
                     frame_count_text_box = text_box_duration_frames;
                 }
                 else{
                     extra_message_rows = text_box_size;
+
                     frame_count_text_box -= 1;
                 }
             }
@@ -393,11 +409,10 @@ int main(){
         char input = get_character_input();
         bool moved = false;
         map[player_y][player_x] = player_tile;
-        if (able_to_move && input != '\0') moved = true;
-        if (able_to_move && input == 'a' && player_x > 0 && map[player_y][player_x - 1] != WATER) player_x--;
-        else if (able_to_move && input == 'd' && player_x < map_cols - 1 && map[player_y][player_x + 1] != WATER) player_x++;
-        else if (able_to_move && input == 'w' && player_y > 0 && map[player_y-1][player_x] != WATER) player_y--;
-        else if (able_to_move && input == 's' && player_y < map_rows - 1 && map[player_y+1][player_x] != WATER) player_y++;
+        if (able_to_move && input == 'a' && player_x > 0 && map[player_y][player_x - 1] != WATER) {player_x--; moved=true;}
+        else if (able_to_move && input == 'd' && player_x < map_cols - 1 && map[player_y][player_x + 1] != WATER) {player_x++; moved=true;}
+        else if (able_to_move && input == 'w' && player_y > 0 && map[player_y-1][player_x] != WATER) {player_y--; moved=true;}
+        else if (able_to_move && input == 's' && player_y < map_rows - 1 && map[player_y+1][player_x] != WATER) {player_y++; moved=true;}
         else if (input == 'q') done = true;
         player_tile = map[player_y][player_x];
         map[player_y][player_x] = player_char;
@@ -416,14 +431,14 @@ int main(){
                     text_boxes.pop();
                 }
                 text_boxes.push({"Battle!", "You've successfully defeated the " + current_enemy->name + " hooray!", {}});
+                log_file("Pushed battle success " + std::to_string(text_boxes.size()));
                 current_enemy.reset();
-                able_to_move = true;
                 game_state = STATE::MAP;
                 able_to_move = true;
             }
         }
 
-        if(moved && check_wild_grass_event(player_tile)){
+        if(moved && check_battle_event(player_tile)){
             static std::random_device rd;
             static std::mt19937 gen(rd());
             static std::uniform_int_distribution<int> dist(0, hostiles.size()-1);
@@ -434,9 +449,8 @@ int main(){
             able_to_move = false;
         }
 
-        if(game_state == STATE::MAP && !able_to_move && text_boxes.size() == 1){
+        if((game_state == STATE::MAP && !able_to_move && text_boxes.size() == 1)){
             // init battle Sequence
-            able_to_move = false;
             game_state = STATE::BATTLE;
             system("clear");
             while(text_boxes.size() > 0){

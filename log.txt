@@ -1,0 +1,81 @@
+Start ------------------------------------
+
+
+popping! 2
+Pushed battle success 1
+popping! 1
+Start ------------------------------------
+
+
+Pushed battle success 1
+Pushed battle success 1
+Pushed battle success 1
+Start ------------------------------------
+
+
+Start ------------------------------------
+
+
+Start ------------------------------------
+
+
+Start ------------------------------------
+
+
+Start ------------------------------------
+
+
+popping! 1
+popping! 1
+popping! 1
+popping! 1
+Start ------------------------------------
+
+
+Pushed battle success 1
+Pushed battle success 1
+Start ------------------------------------
+
+
+Pushed battle success 1
+Start ------------------------------------
+
+
+Pushed battle success 1
+Pushed battle success 1
+Start ------------------------------------
+
+
+Pushed battle success 1
+Start ------------------------------------
+
+
+Start ------------------------------------
+
+
+popping! 2
+Pushed battle success 1
+popping! 2
+popping! 2
+Start ------------------------------------
+
+
+popping! 2
+Pushed battle success 1
+popping! 1
+Start ------------------------------------
+
+
+popping! 2
+Pushed battle success 1
+popping! 1
+Start ------------------------------------
+
+
+popping! 2
+Pushed battle success 1
+popping! 1
+Start ------------------------------------
+
+
+popping! 2
