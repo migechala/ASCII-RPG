@@ -319,7 +319,7 @@ int main(){
     const int map_rows = 1000;
     const int map_cols = 1000;
     const TILE_TYPE player_char = TILE_TYPE::PLAYER;
-    const int scale = 2;
+    const int scale = 5;
     const int text_box_duration_frames = 90;
     bool able_to_move = true;
     std::unique_ptr<HostileType> current_enemy;
@@ -418,8 +418,8 @@ int main(){
         map[player_y][player_x] = player_char;
 
         if (game_state == STATE::BATTLE){
-           if(frame_count_text_box == text_box_duration_frames && input - '0' <= 4 && input - '0' >= 1){
-                current_enemy->health -= attacks[player_attacks[input - '0']].damage;
+           if(frame_count_text_box == text_box_duration_frames && input - '0' - 1 < 4 && input - '0' >= 1){
+                current_enemy->health -= attacks[player_attacks[input - '0' - 1]].damage;
                 ATTACK enemy_move = current_enemy->attacks[0]; // make this random later
                 text_boxes.push({"Battle!", current_enemy->name + " took " + std::to_string(attacks[player_attacks[input - '0']].damage) + " damage!", {}});
                 text_boxes.push({"Battle!","", {current_enemy->name + " used " + attacks[enemy_move].name, "Player took " + std::to_string(attacks[enemy_move].damage) + " damage!"}});
